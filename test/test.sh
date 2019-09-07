@@ -44,8 +44,10 @@ test_basic() {
 }
 
 run_test_case() {
-    result=0
-    (set_up; set -x; "$1") >out 2>&1 || result=$?
+    set +e
+    (set_up; set -ex; "$1") >out 2>&1
+    result=$?
+    set -e
     : $(( run += 1 ))
     if [ "${result}" -ne 0 ] ;then
         tput bold
