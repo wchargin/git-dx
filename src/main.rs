@@ -10,7 +10,7 @@ fn main() -> io::Result<()> {
             "Failed to parse commit: {:?}",
             String::from_utf8_lossy(&out.stderr)
         );
-        return Ok(());
+        std::process::exit(1)
     }
     let oid = parse_oid(out.stdout).expect("successful rev-parse should give valid hash");
     println!("Head is at {:?}", oid);
