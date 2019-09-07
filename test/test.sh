@@ -49,14 +49,34 @@ test_basic() {
     git -C client add c
     git -C client commit -m 'Create "c"' && tick
     git -C client push origin work
-    EDITOR='perl -i -pe "s/pick/edit/ if $. == 1"' \
-        git -C client rebase -i HEAD~2
+    EDITOR='perl -i -pe "s/pick/edit/"' git -C client rebase -i HEAD~2
     >client/b printf 'b2\n'
     git -C client add b
     git -C client commit --amend --no-edit && tick
     git -C client rebase --continue
-    git -C client log --oneline --graph work
-    git -C client log --oneline --graph origin/work
+    >client/c printf 'c2\n'
+    git -C client add c
+    git -C client commit --amend --no-edit && tick
+    git -C client rebase --continue
+    git -C client log --color --graph work
+    git -C client log --color --graph origin/work
+    git -C client checkout --detach origin/work~
+    commit="$(
+        printf '[update patch]\n' |
+            git -C client commit-tree work~^{tree} -p HEAD
+    )" && tick
+    git -C client checkout --detach origin/work
+    if ! git -C client merge "${commit}" --no-edit -m '[diffbase]'; then
+        git -C client add .
+        git -C client commit --no-edit && tick
+    fi
+    commit="$(
+        printf '[update patch]\n' |
+            git -C client commit-tree work^{tree} -p HEAD
+    )" && tick
+    git -C client checkout --detach "${commit}"
+    git -C client push origin HEAD:work
+    git -C client log --format='%h %d %s' --graph origin/work
 }
 
 run_test_case() {
