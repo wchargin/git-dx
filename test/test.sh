@@ -18,6 +18,8 @@ set_up() {
     export GIT_MERGE_AUTOEDIT=no
     export GIT_MERGE_VERBOSITY=5
     export HOME="${PWD}"
+    unset GIT_DIR
+    unset GIT_WORK_TREE
     unset XDG_CACHE_HOME
     unset XDG_CONFIG_HOME
     tick
