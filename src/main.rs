@@ -1,10 +1,17 @@
 use std::process::{Command, Stdio};
 
+const BRANCH_DIRECTIVE: &str = "wchargin-branch";
+
 mod err {
     #[derive(Debug)]
     pub enum Error {
         /// A user-provided commit reference does not exist.
         NoSuchCommit(String),
+        /// A commit message is expected to have a trailer with the given key, but does not.
+        MissingTrailer { oid: String, key: String },
+        /// A commit message is expected to have at most one trailer with the given key, but has
+        /// more than one.
+        DuplicateTrailer { oid: String, key: String },
         /// The `git(1)` binary behaved unexpectedly: e.g., `rev-parse --verify REVISION` returned
         /// success but did not write an object ID to standard output.
         GitContract(String),
@@ -37,10 +44,9 @@ fn main() -> err::Result<()> {
             String::from_utf8_lossy(&buf)
         ))
     })?;
-    println!("Head is at {:?}", oid);
     let msg = commit_message(&oid)?;
-    println!("Commit message:\n{:?}", msg);
-    println!("Trailers: {:?}", trailers(msg)?);
+    let trailers = trailers(msg)?;
+    println!("{:?}", unique_trailer(&oid, BRANCH_DIRECTIVE, &trailers)?);
     Ok(())
 }
 
@@ -83,6 +89,31 @@ fn trailers(message: String) -> err::Result<Vec<(String, String)>> {
         result.push((parts[0].to_string(), parts[1].to_string()));
     }
     Ok(result)
+}
+
+fn unique_trailer<'a>(
+    oid: &str,
+    key: &str,
+    trailers: &'a [(String, String)],
+) -> err::Result<&'a str> {
+    let mut found: Option<&'a str> = None;
+    for (k, v) in trailers {
+        if k == key {
+            if found.replace(v.as_ref()).is_some() {
+                return Err(err::Error::DuplicateTrailer {
+                    oid: oid.to_string(),
+                    key: key.to_string(),
+                });
+            }
+        }
+    }
+    match found {
+        Some(v) => Ok(v),
+        None => Err(err::Error::MissingTrailer {
+            oid: oid.to_string(),
+            key: key.to_string(),
+        }),
+    }
 }
 
 fn parse_oid(stdout: Vec<u8>) -> Result<String, Vec<u8>> {
