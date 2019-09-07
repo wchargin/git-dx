@@ -1,4 +1,4 @@
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 mod err {
     #[derive(Debug)]
@@ -38,7 +38,9 @@ fn main() -> err::Result<()> {
         ))
     })?;
     println!("Head is at {:?}", oid);
-    println!("Commit message:\n{:?}", commit_message(&oid)?);
+    let msg = commit_message(&oid)?;
+    println!("Commit message:\n{:?}", msg);
+    println!("Trailers: {:?}", trailers(msg)?);
     Ok(())
 }
 
@@ -50,6 +52,37 @@ fn commit_message(oid: &str) -> err::Result<String> {
         return Err(err::Error::NoSuchCommit(oid.to_string()));
     }
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+fn trailers(message: String) -> err::Result<Vec<(String, String)>> {
+    let mut comm = Command::new("git")
+        .args(&[
+            "-c",
+            // TODO(@wchargin): Remove this explicit separator definition, in favor of the more
+            // robust parsing algorithm described here:
+            // https://public-inbox.org/git/CAFW+GMDazFSDzBrvzMqaPGwew=+CP7tw7G5FfDqcAUYd3qjPuQ@mail.gmail.com/
+            "trailer.separators=:",
+            "interpret-trailers",
+            "--parse",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()?;
+    use std::io::Write;
+    comm.stdin.as_mut().unwrap().write_all(message.as_bytes())?;
+    let out = comm.wait_with_output()?;
+    let mut result = Vec::new();
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        let parts: Vec<_> = line.splitn(2, ": ").collect();
+        if parts.len() != 2 {
+            return Err(err::Error::GitContract(format!(
+                "interpret-trailers emitted line: {:?}",
+                line,
+            )));
+        }
+        result.push((parts[0].to_string(), parts[1].to_string()));
+    }
+    Ok(result)
 }
 
 fn parse_oid(stdout: Vec<u8>) -> Result<String, Vec<u8>> {
