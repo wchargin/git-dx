@@ -20,12 +20,25 @@ set_up() {
     export HOME="${PWD}"
     unset XDG_CACHE_HOME
     unset XDG_CONFIG_HOME
-    git init --quiet
+    tick
+}
+
+tick_number=1546300800
+
+tick() {
+    export GIT_AUTHOR_DATE="${tick_number} +0000"
+    export GIT_COMMITTER_DATE="${tick_number} +0000"
+    : $(( tick_number += 60 ))
 }
 
 test_basic() {
-    [ -d .git ]
-    which git-dx
+    git init --quiet --bare server
+    git init --quiet client
+    git -C client remote add origin "${PWD}/server"
+    git -C client commit --allow-empty -m 'Initial commit' && tick
+    git -C client push origin master
+    git -C client rev-parse --verify 'HEAD^{commit}'
+    git -C server rev-parse --verify 'HEAD^{commit}'
 }
 
 run_test_case() {
@@ -80,7 +93,7 @@ main() {
 
 cleanup() {
     if [ -n "${workdir}" ]; then
-        rm -r "${workdir}"
+        rm -rf "${workdir}"
     fi
 }
 
