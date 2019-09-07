@@ -35,12 +35,26 @@ test_basic() {
     git init --quiet --bare server
     git init --quiet client
     git -C client remote add origin "${PWD}/server"
-    git -C client commit --allow-empty -m 'Initial commit' && tick
+    >client/a printf 'a\n'
+    git -C client add a
+    git -C client commit -m 'Create "a"' && tick
     git -C client push origin master
-    git -C client rev-parse --verify 'HEAD^{commit}'
-    git -C server rev-parse --verify 'HEAD^{commit}'
-    pwd
-    false
+    git -C client checkout -b work
+    >client/b printf 'b\n'
+    git -C client add b
+    git -C client commit -m 'Create "b"' && tick
+    >client/c printf 'c\n'
+    git -C client add c
+    git -C client commit -m 'Create "c"' && tick
+    git -C client push origin work
+    EDITOR='perl -i -pe "s/pick/edit/ if $. == 1"' \
+        git -C client rebase -i HEAD~2
+    >client/b printf 'b2\n'
+    git -C client add b
+    git -C client commit --amend --no-edit && tick
+    git -C client rebase --continue
+    git -C client log --oneline --graph work
+    git -C client log --oneline --graph origin/work
 }
 
 run_test_case() {
