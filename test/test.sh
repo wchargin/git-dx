@@ -39,11 +39,13 @@ test_basic() {
     git -C client push origin master
     git -C client rev-parse --verify 'HEAD^{commit}'
     git -C server rev-parse --verify 'HEAD^{commit}'
+    pwd
+    false
 }
 
 run_test_case() {
     result=0
-    (set_up; set -x; "$1") || result=$?
+    (set_up; set -x; "$1") >out 2>&1 || result=$?
     : $(( run += 1 ))
     if [ "${result}" -ne 0 ] ;then
         tput bold
@@ -52,6 +54,7 @@ run_test_case() {
         tput sgr0
         printf ' %s exited %d\n' "$1" "${result}"
         : $(( failed += 1 ))
+        cat out
     else
         tput bold
         printf 'PASS'
