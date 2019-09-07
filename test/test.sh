@@ -25,7 +25,7 @@ set_up() {
 
 test_basic() {
     [ -d .git ]
-    pwd
+    which git-dx
 }
 
 run_test_case() {
@@ -48,12 +48,32 @@ run_test_case() {
     fi
 }
 
+run_test_cases() {
+    run_test_case test_basic
+}
+
 main() {
+    if [ $# -ne 1 ]; then
+        printf >&2 'usage: %s GIT_DX_BINARY\n' "$0"
+        return 2
+    fi
+    case "$1" in
+        /*) export GIT_DX_BINARY="$1" ;;
+        *) export GIT_DX_BINARY="${PWD}/$1" ;;
+    esac
+    if ! [ -x "${GIT_DX_BINARY}" ]; then
+        printf >&2 'fatal: expected GIT_DX_BINARY to be executable: %s\n' \
+            "${GIT_DX_BINARY}"
+        return 2
+    fi
     trap cleanup EXIT
     workdir="$(mktemp -d)"
     cd "${workdir}"
+    mkdir bin
+    export PATH="${PWD}/bin:${PATH}"
+    ln -s "${GIT_DX_BINARY}" ./bin/git-dx
     export TMPDIR="$PWD"
-    run_test_case test_basic
+    run_test_cases
     printf '%s run, %s passed, %s failed\n' "${run}" "${passed}" "${failed}"
     [ "${failed}" -eq 0 ]
 }
