@@ -31,20 +31,20 @@ test_basic() {
 run_test_case() {
     result=0
     (set_up; set -x; "$1") || result=$?
-    (( ++run ))
+    : $(( run += 1 ))
     if [ "${result}" -ne 0 ] ;then
         tput bold
         tput setaf 1
         printf 'FAIL'
         tput sgr0
         printf ' %s exited %d\n' "$1" "${result}"
-        (( ++failed ))
+        : $(( failed += 1 ))
     else
         tput bold
         printf 'PASS'
         tput sgr0
         printf ' %s\n' "$1"
-        (( ++passed ))
+        : $(( passed += 1 ))
     fi
 }
 
