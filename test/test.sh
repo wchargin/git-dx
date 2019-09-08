@@ -37,46 +37,48 @@ test_basic() {
     git init --quiet --bare server
     git init --quiet client
     git -C client remote add origin "${PWD}/server"
+
     >client/a printf 'a\n'
     git -C client add a
     git -C client commit -m 'Create "a"' && tick
     git -C client push origin master
     git -C client checkout -b work
+
     >client/b printf 'b\n'
     git -C client add b
-    git -C client commit -m 'Create "b"' && tick
+    git -C client commit -m 'Create "b"' -m 'wchargin-branch: foo' && tick
+    git -C client push origin HEAD:refs/heads/wchargin-foo
+
     >client/c printf 'c\n'
     git -C client add c
-    git -C client commit -m 'Create "c"' && tick
-    git -C client push origin work
+    git -C client commit -m 'Create "c"' -m 'wchargin-branch: bar' && tick
+    git -C client push origin HEAD:refs/heads/wchargin-bar
+
     EDITOR='perl -i -pe "s/pick/edit/"' git -C client rebase -i HEAD~2
+
     >client/b printf 'b2\n'
     git -C client add b
-    git -C client commit --amend --no-edit && tick
+    git -C client commit --amend -m 'Amend "b"' -m 'wchargin-branch: foo' && tick
+    dx_commit="$(git -C client dx)"
+    git -C client push origin "${dx_commit}":wchargin-foo
     git -C client rebase --continue
+
     >client/c printf 'c2\n'
     git -C client add c
-    git -C client commit --amend --no-edit && tick
+    git -C client commit --amend -m 'Amend "c"' -m 'wchargin-branch: bar' && tick
+    dx_commit="$(git -C client dx)"
+    git -C client push origin "${dx_commit}":wchargin-bar
     git -C client rebase --continue
-    git -C client log --color --graph work
-    git -C client log --color --graph origin/work
-    git -C client checkout --detach origin/work~
-    commit="$(
-        printf '[update patch]\n' |
-            git -C client commit-tree work~^{tree} -p HEAD
-    )" && tick
-    git -C client checkout --detach origin/work
-    if ! git -C client merge "${commit}" --no-edit -m '[diffbase]'; then
-        git -C client add .
-        git -C client commit --no-edit && tick
-    fi
-    commit="$(
-        printf '[update patch]\n' |
-            git -C client commit-tree work^{tree} -p HEAD
-    )" && tick
-    git -C client checkout --detach "${commit}"
-    git -C client push origin HEAD:work
-    git -C client log --format='%h %d %s' --graph origin/work
+
+    git -C client log --color --oneline --graph work
+    git -C client log --color --oneline --graph origin/wchargin-bar
+
+    foo_local_tree="$(git -C client rev-parse --verify 'work~1^{tree}')"
+    bar_local_tree="$(git -C client rev-parse --verify 'work~0^{tree}')"
+    foo_remote_tree="$(git -C server rev-parse --verify 'wchargin-foo^{tree}')"
+    bar_remote_tree="$(git -C server rev-parse --verify 'wchargin-bar^{tree}')"
+    [ "${foo_local_tree}" = "${foo_remote_tree}" ]
+    [ "${bar_local_tree}" = "${bar_remote_tree}" ]
 }
 
 run_test_case() {
