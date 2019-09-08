@@ -1,6 +1,8 @@
 use std::process::{Command, Stdio};
 
 const BRANCH_DIRECTIVE: &str = "wchargin-branch";
+const BRANCH_PREFIX: &str = "wchargin-";
+const DEFAULT_REMOTE: &str = "origin";
 
 mod err {
     #[derive(Debug)]
@@ -29,24 +31,14 @@ mod err {
 }
 
 fn main() -> err::Result<()> {
-    let out = Command::new("git")
-        .args(&["rev-parse", "--verify", "HEAD^{commit}"])
-        .output()?;
-    if !out.status.success() {
-        return Err(err::Error::NoSuchCommit(format!(
-            "failed to parse commit: {:?}",
-            &out.stderr
-        )));
-    }
-    let oid = parse_oid(out.stdout).map_err(|buf| {
-        err::Error::GitContract(format!(
-            "rev-parse returned success but stdout was: {:?}",
-            String::from_utf8_lossy(&buf)
-        ))
-    })?;
+    let oid =
+        rev_parse("HEAD^{commit}")?.ok_or_else(|| err::Error::NoSuchCommit("HEAD".to_string()))?;
     let msg = commit_message(&oid)?;
     let trailers = trailers(msg)?;
-    println!("{:?}", unique_trailer(&oid, BRANCH_DIRECTIVE, &trailers)?);
+    let branch = unique_trailer(&oid, BRANCH_DIRECTIVE, &trailers)?;
+    let remote_branch = format!("{}{}", BRANCH_PREFIX, branch);
+    let remote_oid = remote_branch_oid(DEFAULT_REMOTE, &remote_branch)?;
+    println!("{} -> {:?}", remote_branch, remote_oid);
     Ok(())
 }
 
@@ -114,6 +106,25 @@ fn unique_trailer<'a>(
             key: key.to_string(),
         }),
     }
+}
+
+fn remote_branch_oid(remote: &str, branch: &str) -> err::Result<Option<String>> {
+    rev_parse(&format!("refs/remotes/{}/{}", remote, branch))
+}
+
+fn rev_parse(identifier: &str) -> err::Result<Option<String>> {
+    let out = Command::new("git")
+        .args(&["rev-parse", "--verify", identifier])
+        .output()?;
+    if !out.status.success() {
+        return Ok(None);
+    }
+    parse_oid(out.stdout).map(Some).map_err(|buf| {
+        err::Error::GitContract(format!(
+            "rev-parse returned success but stdout was: {:?}",
+            String::from_utf8_lossy(&buf)
+        ))
+    })
 }
 
 fn parse_oid(stdout: Vec<u8>) -> Result<String, Vec<u8>> {
