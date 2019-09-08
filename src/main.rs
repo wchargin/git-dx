@@ -22,13 +22,26 @@ mod err {
         IoError(std::io::Error),
     }
 
+    pub type Result<T> = std::result::Result<T, Error>;
+
     impl From<std::io::Error> for Error {
         fn from(e: std::io::Error) -> Error {
             Error::IoError(e)
         }
     }
 
-    pub type Result<T> = std::result::Result<T, Error>;
+    pub fn from_git<F: FnOnce() -> String>(output: &std::process::Output, fmt: F) -> Result<()> {
+        if output.status.success() {
+            return Ok(());
+        }
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let msg = if stderr.is_empty() {
+            fmt()
+        } else {
+            format!("{}: {}", fmt(), stderr)
+        };
+        Err(Error::GitContract(msg))
+    }
 }
 
 fn main() -> err::Result<()> {
@@ -37,18 +50,12 @@ fn main() -> err::Result<()> {
     let result = integrate(&oid)?;
     eprintln!("successfully integrated");
     println!("{}", result);
-    match Command::new("git")
-        .args(&["checkout", "--detach", &oid])
-        .output()?
-    {
-        ref out if out.status.success() => (),
-        _ => {
-            return Err(err::Error::GitContract(format!(
-                "failed to check out original commit {}",
-                oid
-            )))
-        }
-    };
+    err::from_git(
+        &Command::new("git")
+            .args(&["checkout", "--detach", &oid])
+            .output()?,
+        || "failed to check out original commit".to_string(),
+    )?;
     Ok(())
 }
 
@@ -108,14 +115,7 @@ fn integrate(change_oid: &str) -> err::Result<String> {
     let out = Command::new("git")
         .args(&["checkout", "--detach", &merge_head])
         .output()?;
-    if !out.status.success() {
-        let msg = format!(
-            "failed to check out {}: {}",
-            merge_head,
-            String::from_utf8_lossy(&out.stderr)
-        );
-        return Err(err::Error::GitContract(msg));
-    }
+    err::from_git(&out, || format!("failed to check out {}", merge_head))?;
 
     // (2)
     let out = Command::new("git")
@@ -133,27 +133,14 @@ fn integrate(change_oid: &str) -> err::Result<String> {
         .output()?;
     if !out.status.success() {
         // Assume that this is due to conflicts.
-        match Command::new("git").args(&["add", "."]).output()? {
-            ref out if out.status.success() => (),
-            out => {
-                return Err(err::Error::GitContract(format!(
-                    "failed to stage: {}",
-                    String::from_utf8_lossy(&out.stderr)
-                )))
-            }
-        };
-        match Command::new("git")
+        let out = &Command::new("git")
             .args(&["commit", "--no-edit"])
-            .output()?
-        {
-            ref out if out.status.success() => (),
-            out => {
-                return Err(err::Error::GitContract(format!(
-                    "failed to commit merge: {}",
-                    String::from_utf8_lossy(&out.stderr)
-                )))
-            }
-        };
+            .output()?;
+        err::from_git(out, || "failed to stage".to_string())?;
+        let out = &Command::new("git")
+            .args(&["commit", "--no-edit"])
+            .output()?;
+        err::from_git(out, || "failed to commit merge".to_string())?;
     }
 
     let base_tree = rev_parse("HEAD^{tree}")?
@@ -180,18 +167,10 @@ fn integrate(change_oid: &str) -> err::Result<String> {
                 String::from_utf8_lossy(&buf),
             ))
         })?;
-        match Command::new("git")
+        let out = Command::new("git")
             .args(&["checkout", "--detach", &result])
-            .output()?
-        {
-            ref out if out.status.success() => (),
-            out => {
-                return Err(err::Error::GitContract(format!(
-                    "failed to commit merge: {}",
-                    String::from_utf8_lossy(&out.stderr)
-                )))
-            }
-        };
+            .output()?;
+        err::from_git(&out, || "failed to commit merge".to_string())?;
         result
     } else {
         rev_parse("HEAD")?
