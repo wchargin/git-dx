@@ -90,13 +90,11 @@ fn unique_trailer<'a>(
 ) -> err::Result<&'a str> {
     let mut found: Option<&'a str> = None;
     for (k, v) in trailers {
-        if k == key {
-            if found.replace(v.as_ref()).is_some() {
-                return Err(err::Error::DuplicateTrailer {
-                    oid: oid.to_string(),
-                    key: key.to_string(),
-                });
-            }
+        if k == key && found.replace(v.as_ref()).is_some() {
+            return Err(err::Error::DuplicateTrailer {
+                oid: oid.to_string(),
+                key: key.to_string(),
+            });
         }
     }
     match found {
