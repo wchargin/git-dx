@@ -33,12 +33,35 @@ mod err {
 fn main() -> err::Result<()> {
     let oid =
         rev_parse("HEAD^{commit}")?.ok_or_else(|| err::Error::NoSuchCommit("HEAD".to_string()))?;
-    let msg = commit_message(&oid)?;
-    let trailers = trailers(msg)?;
-    let branch = unique_trailer(&oid, BRANCH_DIRECTIVE, &trailers)?;
-    let remote_branch = format!("{}{}", BRANCH_PREFIX, branch);
+    let branch = look_up_trailer(BRANCH_DIRECTIVE, &trailers(commit_message(&oid)?)?)
+        .unique(&oid)?
+        .to_string();
+    let remote_branch = format!("{}{}", BRANCH_PREFIX, &branch);
     let remote_oid = remote_branch_oid(DEFAULT_REMOTE, &remote_branch)?;
-    println!("{} -> {:?}", remote_branch, remote_oid);
+    println!("commit branch: {} -> {:?}", remote_branch, remote_oid);
+
+    let parent_oid = rev_parse(&format!("{}~^{{commit}}", oid))?
+        .ok_or_else(|| err::Error::NoSuchCommit("HEAD~".to_string()))?;
+    let parent_branch: Option<String> =
+        match look_up_trailer(BRANCH_DIRECTIVE, &trailers(commit_message(&parent_oid)?)?) {
+            TrailerMatch::Duplicate { key } => {
+                return Err(err::Error::DuplicateTrailer {
+                    oid: parent_oid.to_string(),
+                    key: key.to_string(),
+                })
+            }
+            TrailerMatch::Missing { .. } => None,
+            TrailerMatch::Unique { value, .. } => Some(value.to_string()),
+        };
+    let merge_target_oid = match parent_branch {
+        None => parent_oid,
+        Some(ref b) => remote_branch_oid(DEFAULT_REMOTE, &format!("{}{}", BRANCH_PREFIX, b))?
+            .unwrap_or(parent_oid),
+    };
+    println!(
+        "merge target: {:?} -> {:?}",
+        parent_branch, merge_target_oid
+    );
     Ok(())
 }
 
@@ -83,27 +106,54 @@ fn trailers(message: String) -> err::Result<Vec<(String, String)>> {
     Ok(result)
 }
 
-fn unique_trailer<'a>(
-    oid: &str,
-    key: &str,
-    trailers: &'a [(String, String)],
-) -> err::Result<&'a str> {
-    let mut found: Option<&'a str> = None;
-    for (k, v) in trailers {
-        if k == key && found.replace(v.as_ref()).is_some() {
-            return Err(err::Error::DuplicateTrailer {
-                oid: oid.to_string(),
-                key: key.to_string(),
-            });
+#[derive(Debug)]
+enum TrailerMatch<'a> {
+    Missing { key: &'a str },
+    Duplicate { key: &'a str },
+    Unique { key: &'a str, value: &'a str },
+}
+
+impl<'a> TrailerMatch<'a> {
+    fn plus(self, value: &'a str) -> Self {
+        use TrailerMatch::{Duplicate, Missing, Unique};
+        match self {
+            Missing { key } => Unique { key, value },
+            Unique { key, .. } => Duplicate { key },
+            Duplicate { .. } => self,
         }
     }
-    match found {
-        Some(v) => Ok(v),
-        None => Err(err::Error::MissingTrailer {
-            oid: oid.to_string(),
-            key: key.to_string(),
-        }),
+    fn unique(self, oid: &str) -> err::Result<&'a str> {
+        match self {
+            TrailerMatch::Unique { value, .. } => Ok(value),
+            TrailerMatch::Missing { key } => Err(err::Error::MissingTrailer {
+                oid: oid.to_string(),
+                key: key.to_string(),
+            }),
+            TrailerMatch::Duplicate { key } => Err(err::Error::DuplicateTrailer {
+                oid: oid.to_string(),
+                key: key.to_string(),
+            }),
+        }
     }
+    fn is_duplicate(&self) -> bool {
+        match self {
+            TrailerMatch::Duplicate { .. } => true,
+            _ => false,
+        }
+    }
+}
+
+fn look_up_trailer<'a>(key: &'a str, trailers: &'a [(String, String)]) -> TrailerMatch<'a> {
+    let mut found = TrailerMatch::Missing { key };
+    for (k, v) in trailers {
+        if k == key {
+            found = found.plus(v);
+            if found.is_duplicate() {
+                return found;
+            }
+        }
+    }
+    found
 }
 
 fn remote_branch_oid(remote: &str, branch: &str) -> err::Result<Option<String>> {
