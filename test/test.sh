@@ -78,7 +78,7 @@ test_basic() {
     git -C client checkout work
 
     git -C client log --color --oneline --graph work
-    git -C client log --color --oneline --graph origin/wchargin-baz
+    git -C client log --color --graph origin/wchargin-baz
 
     foo_local_tree="$(git -C client rev-parse --verify 'work~2^{tree}')"
     bar_local_tree="$(git -C client rev-parse --verify 'work~1^{tree}')"

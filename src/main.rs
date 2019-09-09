@@ -87,14 +87,7 @@ fn integrate(change_oid: &str) -> err::Result<String> {
         oid: change_oid.to_string(),
         key: BRANCH_DIRECTIVE.to_string(),
     })?;
-
-    let trailers = format!(
-        "{}: {}\n{}: {}",
-        BRANCH_DIRECTIVE,
-        &change_branch[BRANCH_PREFIX.len()..], // hack
-        SOURCE_DIRECTIVE,
-        change_oid
-    );
+    let change_branch_unprefixed = &change_branch[BRANCH_PREFIX.len()..]; // hack
 
     let parent_oid_ref = format!("{}~^{{commit}}", change_oid);
     let parent_oid = match rev_parse(&parent_oid_ref)? {
@@ -108,8 +101,9 @@ fn integrate(change_oid: &str) -> err::Result<String> {
         None => None,
     }
     .unwrap_or_else(|| parent_oid.clone());
-    let merge_head =
-        remote_branch_oid(DEFAULT_REMOTE, &change_branch)?.unwrap_or_else(|| diffbase.clone());
+    let merge_head = remote_branch_oid(DEFAULT_REMOTE, &change_branch)?;
+    let new_branch = merge_head.is_none();
+    let merge_head = merge_head.unwrap_or_else(|| diffbase.clone());
 
     // (1)
     let out = Command::new("git")
@@ -128,7 +122,10 @@ fn integrate(change_oid: &str) -> err::Result<String> {
             "-m",
             "[update diffbase]",
             "-m",
-            &trailers,
+            &format!(
+                "{}: {}\n{}: {}",
+                BRANCH_DIRECTIVE, change_branch_unprefixed, SOURCE_DIRECTIVE, change_oid
+            ),
         ])
         .output()?;
     if !out.status.success() {
@@ -152,15 +149,47 @@ fn integrate(change_oid: &str) -> err::Result<String> {
 
     // (3)
     let result = if change_tree != base_tree {
-        let mut child = Command::new("git")
-            .args(&["commit-tree", &change_tree, "-p", "HEAD"])
+        let msg = if new_branch {
+            // TODO(@wchargin): Superfluous double-read of commit message; we read it earlier to
+            // get the branch name.
+            commit_message(change_oid)?
+        } else {
+            "[update patch]\n".to_string()
+        };
+        let mut interpret_trailers_child = Command::new("git")
+            .args(&[
+                "interpret-trailers",
+                "--where",
+                "end",
+                "--if-exists",
+                "replace",
+                "--trailer",
+                &format!("{}: {}", BRANCH_DIRECTIVE, change_branch_unprefixed),
+                "--trailer",
+                &format!("{}: {}", SOURCE_DIRECTIVE, change_oid),
+            ])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
             .spawn()?;
-        let stdin = child.stdin.as_mut().expect("failed to open stdin");
+        let commit_tree_child = Command::new("git")
+            .args(&["commit-tree", &change_tree, "-p", "HEAD"])
+            .stdin(
+                interpret_trailers_child
+                    .stdout
+                    .take()
+                    .expect("interpret-trailers stdout"),
+            )
+            .stdout(Stdio::piped())
+            .spawn()?;
+        let stdin = interpret_trailers_child
+            .stdin
+            .as_mut()
+            .expect("interpret-trailers-stdin");
         use std::io::Write;
-        stdin.write_all(format!("[update patch]\n\n{}", &trailers).as_bytes())?;
-        let out = child.wait_with_output()?;
+        stdin.write_all(msg.as_bytes())?;
+        interpret_trailers_child.wait()?;
+        let out = commit_tree_child.wait_with_output()?;
         let result = parse_oid(out.stdout).map_err(|buf| {
             err::Error::GitContract(format!(
                 "commit-tree gave bad output: {:?}",
