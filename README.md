@@ -93,8 +93,8 @@ key gives the **target branch name**. For instance, a commit with trailer
     Dx-branch: reticulate-splines
 
 would specify a target branch name of `myname-reticulate-splines` if the branch
-prefix were configured as `myname-`. See `man git-interpret-trailers` for more
-information about trailers in general.
+prefix were configured as `myname-`. See [`git-interpret-trailers`][trailers]
+for more information about trailers in general.
 
 The remote branch specified by a source commit is called the **target branch**.
 After a successful integration, the source commit and the head of the target
@@ -110,6 +110,8 @@ branch and is not itself an ancestor of `origin/master`, then the remote
 diffbase is the head of the local diffbase’s target branch. Otherwise, the
 remote diffbase is simply the local diffbase. In any case, the remote diffbase
 should be treequal to the local diffbase.
+
+[trailers]: https://git-scm.com/docs/git-interpret-trailers
 
 ## Status
 
