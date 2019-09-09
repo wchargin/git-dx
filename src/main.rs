@@ -90,16 +90,18 @@ fn integrate(source_oid: &str) -> err::Result<String> {
     })?;
     let target_branch_unprefixed = &target_branch[BRANCH_PREFIX.len()..]; // hack
 
-    let local_diffbase_ref = format!("{}~^{{commit}}", source_oid);
-    let local_diffbase = match rev_parse(&local_diffbase_ref)? {
-        Some(v) => v,
-        None => return Err(err::Error::NoSuchCommit(local_diffbase_ref)),
+    let remote_diffbase = {
+        let local_diffbase_ref = format!("{}~^{{commit}}", source_oid);
+        let local_diffbase = match rev_parse(&local_diffbase_ref)? {
+            Some(v) => v,
+            None => return Err(err::Error::NoSuchCommit(local_diffbase_ref)),
+        };
+        match branch_name(&local_diffbase)? {
+            Some(ref name) => remote_branch_oid(DEFAULT_REMOTE, name)?,
+            None => None,
+        }
+        .unwrap_or_else(|| local_diffbase)
     };
-    let remote_diffbase = match branch_name(&local_diffbase)? {
-        Some(ref name) => remote_branch_oid(DEFAULT_REMOTE, name)?,
-        None => None,
-    }
-    .unwrap_or_else(|| local_diffbase.clone());
     let merge_head = remote_branch_oid(DEFAULT_REMOTE, &target_branch)?;
     let new_branch = merge_head.is_none();
     let merge_head = merge_head.unwrap_or_else(|| remote_diffbase.clone());
@@ -109,6 +111,7 @@ fn integrate(source_oid: &str) -> err::Result<String> {
         .args(&["checkout", "--detach", &merge_head])
         .output()?;
     err::from_git(&out, || format!("failed to check out {}", merge_head))?;
+    std::mem::drop(out);
 
     // (2)
     let out = Command::new("git")
@@ -138,6 +141,7 @@ fn integrate(source_oid: &str) -> err::Result<String> {
             .output()?;
         err::from_git(out, || "failed to commit merge".to_string())?;
     }
+    std::mem::drop(out);
 
     let base_tree = rev_parse("HEAD^{tree}")?
         .ok_or_else(|| err::Error::GitContract("failed to rev-parse HEAD^{tree}".to_string()))?;
