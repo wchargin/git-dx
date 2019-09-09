@@ -68,13 +68,14 @@ fn main() -> err::Result<()> {
 ///
 /// The resulting commit will also be checked out on success. On failure, the state of the work
 /// tree and index are not defined.
-fn integrate(change_oid: &str) -> err::Result<String> {
-    // Steps:
-    //  1. Check out the remote version of the target, or (if none exists) the remote version of
-    //     the parent, or (if none exists) the parent.
-    //  2. Merge in the remote version of the parent, or (if none exists) the parent. Commit
-    //     conflicts as they stand. Create an "update diffbase" commit if this incurs any changes.
-    //  3. Commit the tree of the target. Create an "update patch" commit if this incurs any
+fn integrate(source_oid: &str) -> err::Result<String> {
+    // Steps (see Terminology section of README.md):
+    //
+    //  1. Check out the remote target branch, or (if none exists) the remote diffbase, or (if none
+    //     exists) the local diffbase.
+    //  2. Merge in the remote diffbase, or (if none exists) the local diffbase. Commit conflicts
+    //     as they stand. Create an "update diffbase" commit if this incurs any changes.
+    //  3. Commit the tree of the source commit. Create an "update patch" commit if this incurs any
     //     changes.
     //
     // Future enhancements:
@@ -83,27 +84,25 @@ fn integrate(change_oid: &str) -> err::Result<String> {
     //  5. If neither (2) nor (3) nor (4) incurs changes, create a "CI skip" commit, purely for
     //     updating the dx-source trailer reference.
 
-    let change_branch = branch_name(&change_oid)?.ok_or_else(|| err::Error::MissingTrailer {
-        oid: change_oid.to_string(),
+    let target_branch = branch_name(&source_oid)?.ok_or_else(|| err::Error::MissingTrailer {
+        oid: source_oid.to_string(),
         key: BRANCH_DIRECTIVE.to_string(),
     })?;
-    let change_branch_unprefixed = &change_branch[BRANCH_PREFIX.len()..]; // hack
+    let target_branch_unprefixed = &target_branch[BRANCH_PREFIX.len()..]; // hack
 
-    let parent_oid_ref = format!("{}~^{{commit}}", change_oid);
-    let parent_oid = match rev_parse(&parent_oid_ref)? {
+    let local_diffbase_ref = format!("{}~^{{commit}}", source_oid);
+    let local_diffbase = match rev_parse(&local_diffbase_ref)? {
         Some(v) => v,
-        None => return Err(err::Error::NoSuchCommit(parent_oid_ref)),
+        None => return Err(err::Error::NoSuchCommit(local_diffbase_ref)),
     };
-    let parent_branch = branch_name(&parent_oid)?; // may be absent
-
-    let diffbase = match parent_branch {
+    let remote_diffbase = match branch_name(&local_diffbase)? {
         Some(ref name) => remote_branch_oid(DEFAULT_REMOTE, name)?,
         None => None,
     }
-    .unwrap_or_else(|| parent_oid.clone());
-    let merge_head = remote_branch_oid(DEFAULT_REMOTE, &change_branch)?;
+    .unwrap_or_else(|| local_diffbase.clone());
+    let merge_head = remote_branch_oid(DEFAULT_REMOTE, &target_branch)?;
     let new_branch = merge_head.is_none();
-    let merge_head = merge_head.unwrap_or_else(|| diffbase.clone());
+    let merge_head = merge_head.unwrap_or_else(|| remote_diffbase.clone());
 
     // (1)
     let out = Command::new("git")
@@ -118,13 +117,13 @@ fn integrate(change_oid: &str) -> err::Result<String> {
             "rerere.enabled=false",
             "merge",
             "--no-edit",
-            &diffbase,
+            &remote_diffbase,
             "-m",
             "[update diffbase]",
             "-m",
             &format!(
                 "{}: {}\n{}: {}",
-                BRANCH_DIRECTIVE, change_branch_unprefixed, SOURCE_DIRECTIVE, change_oid
+                BRANCH_DIRECTIVE, target_branch_unprefixed, SOURCE_DIRECTIVE, source_oid
             ),
         ])
         .output()?;
@@ -142,7 +141,7 @@ fn integrate(change_oid: &str) -> err::Result<String> {
 
     let base_tree = rev_parse("HEAD^{tree}")?
         .ok_or_else(|| err::Error::GitContract("failed to rev-parse HEAD^{tree}".to_string()))?;
-    let change_tree_ref = format!("{}^{{tree}}", change_oid);
+    let change_tree_ref = format!("{}^{{tree}}", source_oid);
     let change_tree = rev_parse(&change_tree_ref)?.ok_or_else(|| {
         err::Error::GitContract(format!("failed to rev-parse {}", change_tree_ref))
     })?;
@@ -152,7 +151,7 @@ fn integrate(change_oid: &str) -> err::Result<String> {
         let msg = if new_branch {
             // TODO(@wchargin): Superfluous double-read of commit message; we read it earlier to
             // get the branch name.
-            commit_message(change_oid)?
+            commit_message(source_oid)?
         } else {
             "[update patch]\n".to_string()
         };
@@ -164,9 +163,9 @@ fn integrate(change_oid: &str) -> err::Result<String> {
                 "--if-exists",
                 "replace",
                 "--trailer",
-                &format!("{}: {}", BRANCH_DIRECTIVE, change_branch_unprefixed),
+                &format!("{}: {}", BRANCH_DIRECTIVE, target_branch_unprefixed),
                 "--trailer",
-                &format!("{}: {}", SOURCE_DIRECTIVE, change_oid),
+                &format!("{}: {}", SOURCE_DIRECTIVE, source_oid),
             ])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
