@@ -70,15 +70,25 @@ test_basic() {
     git -C client push origin "${dx_commit}":wchargin-bar
     git -C client rebase --continue
 
-    git -C client log --color --oneline --graph work
-    git -C client log --color --oneline --graph origin/wchargin-bar
+    >client/d printf 'd\n'
+    git -C client add d
+    git -C client commit -m 'Create "d"' -m 'wchargin-branch: baz' && tick
+    dx_commit="$(git -C client dx)"
+    git -C client push origin "${dx_commit}":refs/heads/wchargin-baz
+    git -C client checkout work
 
-    foo_local_tree="$(git -C client rev-parse --verify 'work~1^{tree}')"
-    bar_local_tree="$(git -C client rev-parse --verify 'work~0^{tree}')"
+    git -C client log --color --oneline --graph work
+    git -C client log --color --oneline --graph origin/wchargin-baz
+
+    foo_local_tree="$(git -C client rev-parse --verify 'work~2^{tree}')"
+    bar_local_tree="$(git -C client rev-parse --verify 'work~1^{tree}')"
+    baz_local_tree="$(git -C client rev-parse --verify 'work~0^{tree}')"
     foo_remote_tree="$(git -C server rev-parse --verify 'wchargin-foo^{tree}')"
     bar_remote_tree="$(git -C server rev-parse --verify 'wchargin-bar^{tree}')"
+    baz_remote_tree="$(git -C server rev-parse --verify 'wchargin-baz^{tree}')"
     [ "${foo_local_tree}" = "${foo_remote_tree}" ]
     [ "${bar_local_tree}" = "${bar_remote_tree}" ]
+    [ "${baz_local_tree}" = "${baz_remote_tree}" ]
 }
 
 run_test_case() {
