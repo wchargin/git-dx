@@ -111,6 +111,9 @@ run_test_case() {
         tput sgr0
         printf ' %s\n' "$1"
         : $(( passed += 1 ))
+        if [ -n "${VERBOSE-}" ]; then
+            cat out
+        fi
     fi
 }
 
