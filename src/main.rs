@@ -132,9 +132,7 @@ fn integrate(source_oid: &str) -> err::Result<String> {
         .output()?;
     if !out.status.success() {
         // Assume that this is due to conflicts.
-        let out = &Command::new("git")
-            .args(&["commit", "--no-edit"])
-            .output()?;
+        let out = &Command::new("git").args(&["add", "."]).output()?;
         err::from_git(out, || "failed to stage".to_string())?;
         let out = &Command::new("git")
             .args(&["commit", "--no-edit"])
