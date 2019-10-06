@@ -160,6 +160,7 @@ fn integrate(source_oid: &str) -> err::Result<String> {
         let mut interpret_trailers_child = Command::new("git")
             .args(&[
                 "interpret-trailers",
+                "--no-divider",
                 "--where",
                 "end",
                 "--if-exists",
@@ -230,6 +231,7 @@ fn trailers(message: String) -> err::Result<Vec<(String, String)>> {
             "trailer.separators=:",
             "interpret-trailers",
             "--parse",
+            "--no-divider",
         ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
