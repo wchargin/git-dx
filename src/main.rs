@@ -1,3 +1,5 @@
+extern crate clap;
+
 use std::process::{Command, Stdio};
 
 const BRANCH_DIRECTIVE: &str = "wchargin-branch";
@@ -45,8 +47,20 @@ mod err {
 }
 
 fn main() -> err::Result<()> {
-    let oid =
-        rev_parse("HEAD^{commit}")?.ok_or_else(|| err::Error::NoSuchCommit("HEAD".to_string()))?;
+    const CLI_ARG_COMMIT: &'static str = "commit";
+    let matches = clap::App::new("git-dx")
+        .version("0.1.0")
+        .arg(
+            clap::Arg::with_name(CLI_ARG_COMMIT)
+                .help("Source commit")
+                .required(true)
+                .default_value("HEAD")
+                .takes_value(true),
+        )
+        .get_matches();
+    let source_commit = matches.value_of(CLI_ARG_COMMIT).unwrap();
+    let oid = rev_parse(&format!("{}^{{commit}}", source_commit))?
+        .ok_or_else(|| err::Error::NoSuchCommit(source_commit.to_string()))?;
     let result = integrate(&oid)?;
     eprintln!("successfully integrated");
     println!("{}", result);
