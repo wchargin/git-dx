@@ -48,6 +48,9 @@ mod err {
 
 fn main() -> err::Result<()> {
     const CLI_ARG_COMMIT: &'static str = "commit";
+    const CLI_ARG_DRY_RUN: &'static str = "dry_run";
+    const CLI_ARG_PUSH: &'static str = "push";
+
     let matches = clap::App::new("git-dx")
         .version("0.1.0")
         .arg(
@@ -57,20 +60,54 @@ fn main() -> err::Result<()> {
                 .default_value("HEAD")
                 .takes_value(true),
         )
+        .arg(
+            clap::Arg::with_name(CLI_ARG_PUSH)
+                .help("Pushes integrated commit to remote")
+                .long("--push"),
+        )
+        .arg(
+            clap::Arg::with_name(CLI_ARG_DRY_RUN)
+                .help("Use dry-run pushes only")
+                .long("--dry-run")
+                .short("-n"),
+        )
         .get_matches();
     let source_commit = matches.value_of(CLI_ARG_COMMIT).unwrap();
+    let push = matches.is_present(CLI_ARG_PUSH);
+    let dry_run = matches.is_present(CLI_ARG_DRY_RUN);
     let oid = rev_parse(&format!("{}^{{commit}}", source_commit))?
         .ok_or_else(|| err::Error::NoSuchCommit(source_commit.to_string()))?;
     let result = integrate(&oid)?;
     eprintln!("successfully integrated");
-    println!("{}", result);
+    println!("{}", result.remote_commit);
     err::from_git(
         &Command::new("git")
             .args(&["checkout", "--detach", &oid])
             .output()?,
         || "failed to check out original commit".to_string(),
     )?;
+    if push {
+        let mut cmd = Command::new("git");
+        cmd.arg("push");
+        if dry_run {
+            cmd.arg("--dry-run");
+        }
+        cmd.arg(DEFAULT_REMOTE);
+        cmd.arg(&format!(
+            "{}:refs/heads/{}",
+            result.remote_commit, result.target_branch
+        ));
+        let push_output = cmd.output()?;
+        err::from_git(&push_output, || "failed to push".to_string())?;
+        eprint!("{}", String::from_utf8_lossy(&push_output.stdout));
+        eprint!("{}", String::from_utf8_lossy(&push_output.stderr));
+    }
     Ok(())
+}
+
+struct Integration {
+    remote_commit: String,
+    target_branch: String,
 }
 
 /// Process the change at `oid` to create a remote-friendly commit, returning the new commit's OID.
@@ -82,7 +119,7 @@ fn main() -> err::Result<()> {
 ///
 /// The resulting commit will also be checked out on success. On failure, the state of the work
 /// tree and index are not defined.
-fn integrate(source_oid: &str) -> err::Result<String> {
+fn integrate(source_oid: &str) -> err::Result<Integration> {
     // Steps (see Terminology section of README.md):
     //
     //  1. Check out the remote target branch, or (if none exists) the remote diffbase, or (if none
@@ -163,7 +200,7 @@ fn integrate(source_oid: &str) -> err::Result<String> {
     })?;
 
     // (3)
-    let result = if change_tree != base_tree {
+    let remote_commit = if change_tree != base_tree {
         let msg = if new_branch {
             // TODO(@wchargin): Superfluous double-read of commit message; we read it earlier to
             // get the branch name.
@@ -222,7 +259,10 @@ fn integrate(source_oid: &str) -> err::Result<String> {
             .ok_or_else(|| err::Error::GitContract(("failed to rev-parse HEAD").to_string()))?
     };
 
-    Ok(result)
+    Ok(Integration {
+        remote_commit,
+        target_branch,
+    })
 }
 
 fn commit_message(oid: &str) -> err::Result<String> {
