@@ -1,5 +1,6 @@
 extern crate clap;
 
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 const BRANCH_DIRECTIVE: &str = "wchargin-branch";
@@ -8,12 +9,16 @@ const BRANCH_PREFIX: &str = "wchargin-";
 const DEFAULT_REMOTE: &str = "origin";
 
 mod err;
+mod git;
+
+use git::GitStore;
 
 fn main() -> err::Result<()> {
     const CLI_ARG_COMMIT: &'static str = "commit";
     const CLI_ARG_DRY_RUN: &'static str = "dry_run";
     const CLI_ARG_PUSH: &'static str = "push";
 
+    let mut git = GitStore::new(PathBuf::new());
     let matches = clap::App::new("git-dx")
         .version("0.1.0")
         .arg(
@@ -38,9 +43,8 @@ fn main() -> err::Result<()> {
     let source_commit = matches.value_of(CLI_ARG_COMMIT).unwrap();
     let push = matches.is_present(CLI_ARG_PUSH);
     let dry_run = matches.is_present(CLI_ARG_DRY_RUN);
-    let oid = rev_parse(&format!("{}^{{commit}}", source_commit))?
-        .ok_or_else(|| err::Error::NoSuchCommit(source_commit.to_string()))?;
-    let result = integrate(&oid)?;
+    let oid = git.rev_parse_commit_ok(source_commit)?;
+    let result = integrate(&mut git, &oid)?;
     eprintln!("successfully integrated");
     println!("{}", result.remote_commit);
     err::from_git(
@@ -82,7 +86,7 @@ struct Integration {
 ///
 /// The resulting commit will also be checked out on success. On failure, the state of the work
 /// tree and index are not defined.
-fn integrate(source_oid: &str) -> err::Result<Integration> {
+fn integrate(git: &mut git::GitStore, source_oid: &str) -> err::Result<Integration> {
     // Steps (see Terminology section of README.md):
     //
     //  1. Check out the remote target branch, or (if none exists) the remote diffbase, or (if none
@@ -106,17 +110,14 @@ fn integrate(source_oid: &str) -> err::Result<Integration> {
 
     let remote_diffbase = {
         let local_diffbase_ref = format!("{}~^{{commit}}", source_oid);
-        let local_diffbase = match rev_parse(&local_diffbase_ref)? {
-            Some(v) => v,
-            None => return Err(err::Error::NoSuchCommit(local_diffbase_ref)),
-        };
+        let local_diffbase = git.rev_parse_commit_ok(&local_diffbase_ref)?;
         match branch_name(&local_diffbase)? {
-            Some(ref name) => remote_branch_oid(DEFAULT_REMOTE, name)?,
+            Some(ref name) => remote_branch_oid(git, DEFAULT_REMOTE, name)?,
             None => None,
         }
         .unwrap_or_else(|| local_diffbase)
     };
-    let merge_head = remote_branch_oid(DEFAULT_REMOTE, &target_branch)?;
+    let merge_head = remote_branch_oid(git, DEFAULT_REMOTE, &target_branch)?;
     let new_branch = merge_head.is_none();
     let merge_head = merge_head.unwrap_or_else(|| remote_diffbase.clone());
 
@@ -155,10 +156,11 @@ fn integrate(source_oid: &str) -> err::Result<Integration> {
     }
     std::mem::drop(out);
 
-    let base_tree = rev_parse("HEAD^{tree}")?
+    let base_tree = git
+        .rev_parse("HEAD^{tree}")?
         .ok_or_else(|| err::Error::GitContract("failed to rev-parse HEAD^{tree}".to_string()))?;
     let change_tree_ref = format!("{}^{{tree}}", source_oid);
-    let change_tree = rev_parse(&change_tree_ref)?.ok_or_else(|| {
+    let change_tree = git.rev_parse(&change_tree_ref)?.ok_or_else(|| {
         err::Error::GitContract(format!("failed to rev-parse {}", change_tree_ref))
     })?;
 
@@ -206,7 +208,7 @@ fn integrate(source_oid: &str) -> err::Result<Integration> {
         stdin.write_all(msg.as_bytes())?;
         interpret_trailers_child.wait()?;
         let out = commit_tree_child.wait_with_output()?;
-        let result = parse_oid(out.stdout).map_err(|buf| {
+        let result = git::parse_oid(out.stdout).map_err(|buf| {
             err::Error::GitContract(format!(
                 "commit-tree gave bad output: {:?}",
                 String::from_utf8_lossy(&buf),
@@ -218,7 +220,7 @@ fn integrate(source_oid: &str) -> err::Result<Integration> {
         err::from_git(&out, || "failed to commit merge".to_string())?;
         result
     } else {
-        rev_parse("HEAD")?
+        git.rev_parse("HEAD")?
             .ok_or_else(|| err::Error::GitContract(("failed to rev-parse HEAD").to_string()))?
     };
 
@@ -330,31 +332,10 @@ fn branch_name(oid: &str) -> err::Result<Option<String>> {
     }
 }
 
-fn remote_branch_oid(remote: &str, branch: &str) -> err::Result<Option<String>> {
-    rev_parse(&format!("refs/remotes/{}/{}", remote, branch))
-}
-
-fn rev_parse(identifier: &str) -> err::Result<Option<String>> {
-    let out = Command::new("git")
-        .args(&["rev-parse", "--verify", identifier])
-        .output()?;
-    if !out.status.success() {
-        return Ok(None);
-    }
-    parse_oid(out.stdout).map(Some).map_err(|buf| {
-        err::Error::GitContract(format!(
-            "rev-parse returned success but stdout was: {:?}",
-            String::from_utf8_lossy(&buf)
-        ))
-    })
-}
-
-fn parse_oid(stdout: Vec<u8>) -> Result<String, Vec<u8>> {
-    let mut raw = String::from_utf8(stdout).map_err(|e| e.into_bytes())?;
-    match raw.pop() {
-        Some('\n') => return Ok(raw),
-        Some(other) => raw.push(other),
-        None => (),
-    }
-    Err(raw.into_bytes())
+fn remote_branch_oid(
+    git: &mut git::GitStore,
+    remote: &str,
+    branch: &str,
+) -> err::Result<Option<String>> {
+    git.rev_parse(&format!("refs/remotes/{}/{}", remote, branch))
 }
