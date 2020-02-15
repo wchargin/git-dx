@@ -7,6 +7,13 @@ pub enum Error {
     /// A commit message is expected to have at most one trailer with the given key, but has
     /// more than one.
     DuplicateTrailer { oid: String, key: String },
+    /// User-supplied text (e.g., a commit message) was improperly encoded. Data not in UTF-8 must
+    /// be declared as such via the `i18n.commitEncoding` setting at commit time. For details, see
+    /// `man git-commit`.
+    InvalidEncoding {
+        oid: String,
+        err: std::string::FromUtf8Error,
+    },
     /// The `git(1)` binary behaved unexpectedly: e.g., `rev-parse --verify REVISION` returned
     /// success but did not write an object ID to standard output.
     GitContract(String),
@@ -15,6 +22,17 @@ pub enum Error {
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
+
+impl Error {
+    /// Parse user-supplied bytes that are expected to represent valid UTF-8, failing with an
+    /// `InvalidEncoding` error referring to `oid` if the bytes are not valid UTF-8.
+    pub fn require_utf8(buffer: Vec<u8>, oid: &str) -> Result<String> {
+        String::from_utf8(buffer).map_err(|e| Error::InvalidEncoding {
+            oid: oid.to_string(),
+            err: e,
+        })
+    }
+}
 
 impl From<std::io::Error> for Error {
     fn from(e: std::io::Error) -> Error {

@@ -44,6 +44,7 @@ fn main() -> err::Result<()> {
     let push = matches.is_present(CLI_ARG_PUSH);
     let dry_run = matches.is_present(CLI_ARG_DRY_RUN);
     let oid = git.rev_parse_commit_ok(source_commit)?;
+    dbg!(git.commit(&oid)?);
     let result = integrate(&mut git, &oid)?;
     eprintln!("successfully integrated");
     println!("{}", result.remote_commit);
