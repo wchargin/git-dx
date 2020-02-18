@@ -158,16 +158,19 @@ fn integrate(git: &mut git::GitStore, source_oid: &str) -> err::Result<Integrati
     }
     std::mem::drop(out);
 
-    let base_tree = git
-        .rev_parse("HEAD^{tree}")?
-        .ok_or_else(|| err::Error::GitContract("failed to rev-parse HEAD^{tree}".to_string()))?;
-    let change_tree_ref = format!("{}^{{tree}}", source_oid);
-    let change_tree = git.rev_parse(&change_tree_ref)?.ok_or_else(|| {
-        err::Error::GitContract(format!("failed to rev-parse {}", change_tree_ref))
-    })?;
+    let base_commit = git
+        .commit(
+            // TODO(@wchargin): Let `GitStore::commit` operate on ephemeral refs like `HEAD` by
+            // taking an argument indicating whether to cache both forms.
+            &git.rev_parse("HEAD")?
+                .ok_or_else(|| err::Error::GitContract(("failed to rev-parse HEAD").to_string()))?,
+        )?
+        .clone();
 
     // (3)
-    let remote_commit = if change_tree != base_tree {
+    let remote_commit = if source_commit.tree == base_commit.tree {
+        base_commit.oid
+    } else {
         let msg = if new_branch {
             source_commit.message
         } else {
@@ -191,7 +194,7 @@ fn integrate(git: &mut git::GitStore, source_oid: &str) -> err::Result<Integrati
             .stderr(Stdio::piped())
             .spawn()?;
         let commit_tree_child = Command::new("git")
-            .args(&["commit-tree", &change_tree, "-p", "HEAD"])
+            .args(&["commit-tree", &source_commit.tree, "-p", "HEAD"])
             .stdin(
                 interpret_trailers_child
                     .stdout
@@ -219,9 +222,6 @@ fn integrate(git: &mut git::GitStore, source_oid: &str) -> err::Result<Integrati
             .output()?;
         err::from_git(&out, || "failed to commit merge".to_string())?;
         result
-    } else {
-        git.rev_parse("HEAD")?
-            .ok_or_else(|| err::Error::GitContract(("failed to rev-parse HEAD").to_string()))?
     };
 
     Ok(Integration {
