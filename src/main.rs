@@ -44,7 +44,6 @@ fn main() -> err::Result<()> {
     let push = matches.is_present(CLI_ARG_PUSH);
     let dry_run = matches.is_present(CLI_ARG_DRY_RUN);
     let oid = git.rev_parse_commit_ok(source_commit)?;
-    dbg!(git.commit(&oid)?);
     let result = integrate(&mut git, &oid)?;
     eprintln!("successfully integrated");
     println!("{}", result.remote_commit);
@@ -102,21 +101,23 @@ fn integrate(git: &mut git::GitStore, source_oid: &str) -> err::Result<Integrati
     //  4. If neither (2) nor (3) incurs changes, create a "CI bump" commit if so directed.
     //  5. If neither (2) nor (3) nor (4) incurs changes, create a "CI skip" commit, purely for
     //     updating the dx-source trailer reference.
+    let source_commit = git.commit(&source_oid)?.clone();
 
-    let target_branch = branch_name(&source_oid)?.ok_or_else(|| err::Error::MissingTrailer {
-        oid: source_oid.to_string(),
-        key: BRANCH_DIRECTIVE.to_string(),
+    let target_branch = branch_name(&source_oid, &source_commit.message)?.ok_or_else(|| {
+        err::Error::MissingTrailer {
+            oid: source_oid.to_string(),
+            key: BRANCH_DIRECTIVE.to_string(),
+        }
     })?;
     let target_branch_unprefixed = &target_branch[BRANCH_PREFIX.len()..]; // hack
 
     let remote_diffbase = {
-        let local_diffbase_ref = format!("{}~^{{commit}}", source_oid);
-        let local_diffbase = git.rev_parse_commit_ok(&local_diffbase_ref)?;
-        match branch_name(&local_diffbase)? {
+        let local_diffbase = git.commit(&format!("{}~^{{commit}}", source_oid))?.clone();
+        match branch_name(&local_diffbase.oid, &local_diffbase.message)? {
             Some(ref name) => remote_branch_oid(git, DEFAULT_REMOTE, name)?,
             None => None,
         }
-        .unwrap_or_else(|| local_diffbase)
+        .unwrap_or_else(|| local_diffbase.oid)
     };
     let merge_head = remote_branch_oid(git, DEFAULT_REMOTE, &target_branch)?;
     let new_branch = merge_head.is_none();
@@ -168,9 +169,7 @@ fn integrate(git: &mut git::GitStore, source_oid: &str) -> err::Result<Integrati
     // (3)
     let remote_commit = if change_tree != base_tree {
         let msg = if new_branch {
-            // TODO(@wchargin): Superfluous double-read of commit message; we read it earlier to
-            // get the branch name.
-            commit_message(source_oid)?
+            source_commit.message
         } else {
             "[update patch]\n".to_string()
         };
@@ -229,16 +228,6 @@ fn integrate(git: &mut git::GitStore, source_oid: &str) -> err::Result<Integrati
         remote_commit,
         target_branch,
     })
-}
-
-fn commit_message(oid: &str) -> err::Result<String> {
-    let out = Command::new("git")
-        .args(&["show", "--format=%B", "--no-patch", oid])
-        .output()?;
-    if !out.status.success() {
-        return Err(err::Error::NoSuchCommit(oid.to_string()));
-    }
-    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
 fn trailers(message: String) -> err::Result<Vec<(String, String)>> {
@@ -323,9 +312,8 @@ fn look_up_trailer<'a>(key: &'a str, trailers: &'a [(String, String)]) -> Traile
     found
 }
 
-fn branch_name(oid: &str) -> err::Result<Option<String>> {
-    let msg = commit_message(&oid)?;
-    let all_trailers = trailers(msg)?;
+fn branch_name(oid: &str, msg: &str) -> err::Result<Option<String>> {
+    let all_trailers = trailers(msg.to_string())?;
     match look_up_trailer(BRANCH_DIRECTIVE, &all_trailers).unique(&oid) {
         Ok(v) => Ok(Some(format!("{}{}", BRANCH_PREFIX, v))),
         Err(err::Error::MissingTrailer { .. }) => Ok(None),
