@@ -41,6 +41,10 @@ fn main() -> err::Result<()> {
         )
         .get_matches();
     let source_commit = matches.value_of(CLI_ARG_COMMIT).unwrap();
+    // Save the original head to re-check-out at the end. Note that this isn't a full restore,
+    // because if your head pointed to a ref then it will be checked out detached. (Ideally, all
+    // this work should be in a separate worktree.)
+    let original_head = git.rev_parse_commit_ok("HEAD")?;
     let push = matches.is_present(CLI_ARG_PUSH);
     let dry_run = matches.is_present(CLI_ARG_DRY_RUN);
     let oid = git.rev_parse_commit_ok(source_commit)?;
@@ -49,7 +53,7 @@ fn main() -> err::Result<()> {
     println!("{}", result.remote_commit);
     err::from_git(
         &Command::new("git")
-            .args(&["checkout", "--detach", &oid])
+            .args(&["checkout", "--detach", &original_head])
             .output()?,
         || "failed to check out original commit".to_string(),
     )?;
