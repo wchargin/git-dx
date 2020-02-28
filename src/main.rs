@@ -14,6 +14,7 @@ mod git;
 use git::GitStore;
 
 fn main() -> err::Result<()> {
+    const CLI_ARG_ALLOW_EMPTY: &'static str = "allow_empty";
     const CLI_ARG_COMMIT: &'static str = "commit";
     const CLI_ARG_DRY_RUN: &'static str = "dry_run";
     const CLI_ARG_PUSH: &'static str = "push";
@@ -39,6 +40,11 @@ fn main() -> err::Result<()> {
                 .long("--dry-run")
                 .short("-n"),
         )
+        .arg(
+            clap::Arg::with_name(CLI_ARG_ALLOW_EMPTY)
+                .help("Create integration commit even when there is no change")
+                .long("--allow-empty"),
+        )
         .get_matches();
     let source_commit = matches.value_of(CLI_ARG_COMMIT).unwrap();
     // Save the original head to re-check-out at the end. Note that this isn't a full restore,
@@ -47,8 +53,9 @@ fn main() -> err::Result<()> {
     let original_head = git.rev_parse_commit_ok("HEAD")?;
     let push = matches.is_present(CLI_ARG_PUSH);
     let dry_run = matches.is_present(CLI_ARG_DRY_RUN);
+    let allow_empty = matches.is_present(CLI_ARG_ALLOW_EMPTY);
     let oid = git.rev_parse_commit_ok(source_commit)?;
-    let result = integrate(&mut git, &oid)?;
+    let result = integrate(&mut git, &oid, allow_empty)?;
     eprintln!("successfully integrated");
     println!("{}", result.remote_commit);
     err::from_git(
@@ -90,7 +97,11 @@ struct Integration {
 ///
 /// The resulting commit will also be checked out on success. On failure, the state of the work
 /// tree and index are not defined.
-fn integrate(git: &mut git::GitStore, source_oid: &str) -> err::Result<Integration> {
+fn integrate(
+    git: &mut git::GitStore,
+    source_oid: &str,
+    allow_empty: bool,
+) -> err::Result<Integration> {
     // Steps (see Terminology section of README.md):
     //
     //  1. Check out the remote target branch, or (if none exists) the remote diffbase, or (if none
@@ -172,11 +183,14 @@ fn integrate(git: &mut git::GitStore, source_oid: &str) -> err::Result<Integrati
         .clone();
 
     // (3)
-    let remote_commit = if source_commit.tree == base_commit.tree {
+    let same_tree = source_commit.tree == base_commit.tree;
+    let remote_commit = if same_tree && !allow_empty {
         base_commit.oid
     } else {
         let msg = if new_branch {
             source_commit.message
+        } else if same_tree {
+            "[no-op] [ci skip]\n".to_string()
         } else {
             "[update patch]\n".to_string()
         };
