@@ -11,7 +11,7 @@ pub enum Error {
     /// be declared as such via the `i18n.commitEncoding` setting at commit time. For details, see
     /// `man git-commit`.
     InvalidEncoding {
-        oid: String,
+        context: String,
         err: std::string::FromUtf8Error,
     },
     /// The `git(1)` binary behaved unexpectedly: e.g., `rev-parse --verify REVISION` returned
@@ -25,10 +25,10 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 impl Error {
     /// Parse user-supplied bytes that are expected to represent valid UTF-8, failing with an
-    /// `InvalidEncoding` error referring to `oid` if the bytes are not valid UTF-8.
-    pub fn require_utf8(buffer: Vec<u8>, oid: &str) -> Result<String> {
+    /// `InvalidEncoding` error referring to `context` if the bytes are not valid UTF-8.
+    pub fn require_utf8(buffer: Vec<u8>, context: &str) -> Result<String> {
         String::from_utf8(buffer).map_err(|e| Error::InvalidEncoding {
-            oid: oid.to_string(),
+            context: context.to_string(),
             err: e,
         })
     }

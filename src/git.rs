@@ -50,6 +50,40 @@ impl GitStore {
         cmd
     }
 
+    /// Get the current head, as a symbolic ref (e.g., branch name) if possible, else as an
+    /// unambiguous object ID.
+    ///
+    /// This is intended to use the same algorithm as `git bisect` for saving and restoring the
+    /// head. It can be restored with `git checkout "${orig_ref}" --`, where `"${orig_ref}"` is the
+    /// value returned from this function.
+    pub fn head(&self) -> err::Result<String> {
+        // First, check whether we're on a branch.
+        let symbolic_ref_out = self.git().args(&["symbolic-ref", "HEAD"]).output()?;
+        if symbolic_ref_out.status.success() {
+            let mut stdout =
+                err::Error::require_utf8(symbolic_ref_out.stdout, "symbolic ref HEAD")?;
+            match stdout.pop() {
+                Some('\n') => (),
+                other => {
+                    if let Some(c) = other {
+                        stdout.push(c);
+                    }
+                    return Err(err::Error::GitContract(format!(
+                        "symbolic-ref HEAD returned: {:?}",
+                        stdout
+                    )));
+                }
+            };
+            let prefix = "refs/heads/";
+            if stdout.starts_with(prefix) {
+                return Ok(stdout.split_off(prefix.len()));
+            }
+        }
+
+        // If we're not, fall back to detached oid.
+        self.rev_parse_commit_ok("HEAD")
+    }
+
     pub fn rev_parse(&self, rev: &str) -> err::Result<Option<String>> {
         let out = self.git().args(&["rev-parse", "--verify", rev]).output()?;
         if !out.status.success() {
