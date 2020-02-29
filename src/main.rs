@@ -46,16 +46,16 @@ fn main() -> err::Result<()> {
                 .long("--allow-empty"),
         )
         .get_matches();
-    let source_commit = matches.value_of(CLI_ARG_COMMIT).unwrap();
     // Save the original head to re-check-out at the end. Note that this isn't a full restore,
     // because if your head pointed to a ref then it will be checked out detached. (Ideally, all
     // this work should be in a separate worktree.)
     let original_head = git.rev_parse_commit_ok("HEAD")?;
+    let source_commit_oid = matches.value_of(CLI_ARG_COMMIT).unwrap();
     let push = matches.is_present(CLI_ARG_PUSH);
     let dry_run = matches.is_present(CLI_ARG_DRY_RUN);
     let allow_empty = matches.is_present(CLI_ARG_ALLOW_EMPTY);
-    let oid = git.rev_parse_commit_ok(source_commit)?;
-    let result = integrate(&mut git, &oid, allow_empty)?;
+    let source_commit = git.commit(source_commit_oid)?.clone();
+    let result = integrate(&mut git, &source_commit, allow_empty)?;
     eprintln!("successfully integrated");
     println!("{}", result.remote_commit);
     err::from_git(
@@ -99,7 +99,7 @@ struct Integration {
 /// tree and index are not defined.
 fn integrate(
     git: &mut git::GitStore,
-    source_oid: &str,
+    source_commit: &git::Commit,
     allow_empty: bool,
 ) -> err::Result<Integration> {
     // Steps (see Terminology section of README.md):
@@ -116,9 +116,9 @@ fn integrate(
     //  4. If neither (2) nor (3) incurs changes, create a "CI bump" commit if so directed.
     //  5. If neither (2) nor (3) nor (4) incurs changes, create a "CI skip" commit, purely for
     //     updating the dx-source trailer reference.
-    let source_commit = git.commit(&source_oid)?.clone();
+    let source_oid = &source_commit.oid;
 
-    let target_branch = branch_name(&source_oid, &source_commit.message)?.ok_or_else(|| {
+    let target_branch = branch_name(source_oid, &source_commit.message)?.ok_or_else(|| {
         err::Error::MissingTrailer {
             oid: source_oid.to_string(),
             key: BRANCH_DIRECTIVE.to_string(),
@@ -173,14 +173,7 @@ fn integrate(
     }
     std::mem::drop(out);
 
-    let base_commit = git
-        .commit(
-            // TODO(@wchargin): Let `GitStore::commit` operate on ephemeral refs like `HEAD` by
-            // taking an argument indicating whether to cache both forms.
-            &git.rev_parse("HEAD")?
-                .ok_or_else(|| err::Error::GitContract(("failed to rev-parse HEAD").to_string()))?,
-        )?
-        .clone();
+    let base_commit = git.commit("HEAD")?.clone();
 
     // (3)
     let same_tree = source_commit.tree == base_commit.tree;
@@ -188,11 +181,11 @@ fn integrate(
         base_commit.oid
     } else {
         let msg = if new_branch {
-            source_commit.message
+            &source_commit.message
         } else if same_tree {
-            "[no-op] [ci skip]\n".to_string()
+            "[no-op] [ci skip]\n"
         } else {
-            "[update patch]\n".to_string()
+            "[update patch]\n"
         };
         let mut interpret_trailers_child = Command::new("git")
             .args(&[

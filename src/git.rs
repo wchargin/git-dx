@@ -21,6 +21,16 @@ pub struct Commit {
     pub message: String,
 }
 
+enum ReadCommit {
+    /// The desired commit has the specified full object ID and already exists in the cache. We
+    /// only return its key rather than a reference to the object (via a `Cow`) because the
+    /// latter would hit an incompleteness in the borrow checker that has not yet been fixed by
+    /// Polonius.
+    Cached(String),
+    /// The desired commit does not exist in cache and has just been read.
+    Read(Commit),
+}
+
 impl GitStore {
     /// Construct a store of the Git repository at the given location. The location is assumed to
     /// be valid for the lifetime of this store: in particular, if the location is given as a
@@ -65,13 +75,13 @@ impl GitStore {
             .ok_or_else(|| err::Error::NoSuchCommit(rev.to_string()))
     }
 
-    /// Read details of a commit object (maybe from cache). The `hash` may be any deterministic
-    /// reference: e.g., a literal unambiguous hash, or something like `HASH~1^2` (where `HASH` is
-    /// a full hash). It should not be mutable (`HEAD`, `master`, `v1.0`) or misinterpretable
-    /// as a flag to `git-show` or friends (e.g., anything starting with a hyphen).
+    /// Read details of a commit object (maybe from cache). The `hash` may be any commit reference:
+    /// e.g., a literal unambiguous hash, a spec like `HASH~1^2` (where `HASH` is a full hash), or
+    /// a context-sensitive reference like `HEAD` or `master`. It should not be misinterpretable as
+    /// a flag to `git-show` or friends (e.g., anything starting with a hyphen).
     // TODO(@wchargin): A recent version of Git (which?) added `--end-of-options` to function like
     // `--` in commands where that is used to disambiguate revisions and paths. Use that to drop
-    // the second side condition?
+    // the side condition?
     pub fn commit(&mut self, hash: &str) -> err::Result<&Commit> {
         if self.commits.contains_key(hash) {
             return Ok(self
@@ -79,11 +89,15 @@ impl GitStore {
                 .get(hash)
                 .expect("hash not in map even after check"));
         }
-        let commit = self.read_commit(hash)?;
-        if commit.oid != hash {
-            // e.g., `hash` is `SOME_HASH~10`
-            self.commits.insert(hash.to_string(), commit.clone());
-        }
+        let commit = match self.read_commit(hash)? {
+            ReadCommit::Cached(oid) => {
+                return Ok(self
+                    .commits
+                    .get(&oid)
+                    .expect("allegedly cached commit not in map"))
+            }
+            ReadCommit::Read(commit) => commit,
+        };
         use std::collections::hash_map::Entry::{Occupied, Vacant};
         match self.commits.entry(commit.oid.clone()) {
             Occupied(e) => {
@@ -95,7 +109,7 @@ impl GitStore {
         }
     }
 
-    fn read_commit(&self, hash: &str) -> err::Result<Commit> {
+    fn read_commit(&self, hash: &str) -> err::Result<ReadCommit> {
         let show_output = self
             .git()
             .args(&["show", "--no-patch", "--pretty=format:%B%n%P%n%T%n%H", hash])
@@ -119,6 +133,11 @@ impl GitStore {
         if self.rev_parse_commit_ok(&output_hash)? != output_hash {
             // successfully showed a different kind of object, like a tree
             return Err(err::Error::NoSuchCommit(hash.to_string()));
+        }
+        if hash != output_hash {
+            if self.commits.contains_key(hash) {
+                return Ok(ReadCommit::Cached(output_hash));
+            }
         }
         let pre_tree_newline = find_last_newline(&mut stdout)?;
         let tree = split_off_at(&mut stdout, pre_tree_newline);
@@ -145,12 +164,12 @@ impl GitStore {
             reverse_parents
         };
         let message = stdout;
-        Ok(Commit {
+        Ok(ReadCommit::Read(Commit {
             oid: output_hash,
             parents,
             tree,
             message,
-        })
+        }))
     }
 }
 
