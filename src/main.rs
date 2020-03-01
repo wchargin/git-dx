@@ -6,7 +6,6 @@ use std::process::{Command, Stdio};
 const BRANCH_DIRECTIVE: &str = "wchargin-branch";
 const SOURCE_DIRECTIVE: &str = "wchargin-source";
 const BRANCH_PREFIX: &str = "wchargin-";
-const DEFAULT_REMOTE: &str = "origin";
 
 mod err;
 mod git;
@@ -18,6 +17,7 @@ fn main() -> err::Result<()> {
     const CLI_ARG_COMMIT: &'static str = "commit";
     const CLI_ARG_DRY_RUN: &'static str = "dry_run";
     const CLI_ARG_PUSH: &'static str = "push";
+    const CLI_ARG_REMOTE: &'static str = "remote";
 
     let mut git = GitStore::new(PathBuf::new());
     let matches = clap::App::new("git-dx")
@@ -45,17 +45,28 @@ fn main() -> err::Result<()> {
                 .help("Create integration commit even when there is no change")
                 .long("--allow-empty"),
         )
+        .arg(
+            clap::Arg::with_name(CLI_ARG_REMOTE)
+                .help("Remote to use for integration and pushing (if `--push` is given)")
+                .short("-r")
+                .required(true)
+                .default_value("origin")
+                .takes_value(true),
+        )
         .get_matches();
     // Save the original head to re-check-out at the end. Note that this isn't a full restore,
     // because if your head pointed to a ref then it will be checked out detached. (Ideally, all
     // this work should be in a separate worktree.)
     let original_head = git.head()?;
+
     let source_commit_oid = matches.value_of(CLI_ARG_COMMIT).unwrap();
     let push = matches.is_present(CLI_ARG_PUSH);
     let dry_run = matches.is_present(CLI_ARG_DRY_RUN);
     let allow_empty = matches.is_present(CLI_ARG_ALLOW_EMPTY);
+    let remote = matches.value_of(CLI_ARG_REMOTE).unwrap();
+
     let source_commit = git.commit(source_commit_oid)?.clone();
-    let result = integrate(&mut git, &source_commit, allow_empty)?;
+    let result = integrate(&mut git, &source_commit, &remote, allow_empty)?;
     eprintln!("successfully integrated");
     println!("{}", result.remote_commit);
     err::from_git(
@@ -70,7 +81,7 @@ fn main() -> err::Result<()> {
         if dry_run {
             cmd.arg("--dry-run");
         }
-        cmd.arg(DEFAULT_REMOTE);
+        cmd.arg(&remote);
         cmd.arg(&format!(
             "{}:refs/heads/{}",
             result.remote_commit, result.target_branch
@@ -100,6 +111,7 @@ struct Integration {
 fn integrate(
     git: &mut git::GitStore,
     source_commit: &git::Commit,
+    remote: &str,
     allow_empty: bool,
 ) -> err::Result<Integration> {
     // Steps (see Terminology section of README.md):
@@ -129,12 +141,12 @@ fn integrate(
     let remote_diffbase = {
         let local_diffbase = git.commit(&format!("{}~^{{commit}}", source_oid))?.clone();
         match branch_name(&local_diffbase.oid, &local_diffbase.message)? {
-            Some(ref name) => remote_branch_oid(git, DEFAULT_REMOTE, name)?,
+            Some(ref name) => remote_branch_oid(git, remote, name)?,
             None => None,
         }
         .unwrap_or_else(|| local_diffbase.oid)
     };
-    let merge_head = remote_branch_oid(git, DEFAULT_REMOTE, &target_branch)?;
+    let merge_head = remote_branch_oid(git, remote, &target_branch)?;
     let new_branch = merge_head.is_none();
     let merge_head = merge_head.unwrap_or_else(|| remote_diffbase.clone());
 
