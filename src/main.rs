@@ -14,6 +14,7 @@ use git::GitStore;
 
 fn main() -> err::Result<()> {
     const CLI_ARG_ALLOW_EMPTY: &'static str = "allow_empty";
+    const CLI_ARG_BUMP: &'static str = "bump";
     const CLI_ARG_COMMIT: &'static str = "commit";
     const CLI_ARG_DRY_RUN: &'static str = "dry_run";
     const CLI_ARG_PUSH: &'static str = "push";
@@ -46,6 +47,11 @@ fn main() -> err::Result<()> {
                 .long("--allow-empty"),
         )
         .arg(
+            clap::Arg::with_name(CLI_ARG_BUMP)
+                .help("Don't skip CI on an empty commit (implies `--allow-empty`)")
+                .long("--bump"),
+        )
+        .arg(
             clap::Arg::with_name(CLI_ARG_REMOTE)
                 .help("Remote to use for integration and pushing (if `--push` is given)")
                 .short("-r")
@@ -62,11 +68,16 @@ fn main() -> err::Result<()> {
     let source_commit_oid = matches.value_of(CLI_ARG_COMMIT).unwrap();
     let push = matches.is_present(CLI_ARG_PUSH);
     let dry_run = matches.is_present(CLI_ARG_DRY_RUN);
-    let allow_empty = matches.is_present(CLI_ARG_ALLOW_EMPTY);
+    let mut allow_empty = matches.is_present(CLI_ARG_ALLOW_EMPTY);
+    let bump = matches.is_present(CLI_ARG_BUMP);
     let remote = matches.value_of(CLI_ARG_REMOTE).unwrap();
 
+    if bump {
+        allow_empty = true;
+    }
+
     let source_commit = git.commit(source_commit_oid)?.clone();
-    let result = integrate(&mut git, &source_commit, &remote, allow_empty)?;
+    let result = integrate(&mut git, &source_commit, &remote, allow_empty, bump)?;
     eprintln!("successfully integrated");
     println!("{}", result.remote_commit);
     err::from_git(
@@ -113,6 +124,7 @@ fn integrate(
     source_commit: &git::Commit,
     remote: &str,
     allow_empty: bool,
+    bump: bool,
 ) -> err::Result<Integration> {
     // Steps (see Terminology section of README.md):
     //
@@ -194,6 +206,8 @@ fn integrate(
     } else {
         let msg = if new_branch {
             &source_commit.message
+        } else if same_tree && bump {
+            "[bump ci]\n"
         } else if same_tree {
             "[no-op] [ci skip]\n"
         } else {
