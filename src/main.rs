@@ -1,5 +1,6 @@
 extern crate clap;
 
+use std::borrow::Cow;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
@@ -178,7 +179,7 @@ fn integrate(
             "--no-edit",
             &remote_diffbase,
             "-m",
-            "[update diffbase]",
+            &format!("[update diffbase: {}]", target_branch_unprefixed),
             "-m",
             &format!(
                 "{}: {}\n{}: {}",
@@ -204,14 +205,14 @@ fn integrate(
     let remote_commit = if same_tree && !allow_empty {
         base_commit.oid
     } else {
-        let msg = if new_branch {
-            &source_commit.message
+        let msg: Cow<'_, str> = if new_branch {
+            source_commit.message.as_str().into()
         } else if same_tree && bump {
-            "[bump ci]\n"
+            "[bump ci]\n".into()
         } else if same_tree {
-            "[no-op] [ci skip]\n"
+            "[no-op] [ci skip]\n".into()
         } else {
-            "[update patch]\n"
+            format!("[update patch: {}]\n", target_branch_unprefixed).into()
         };
         let mut interpret_trailers_child = Command::new("git")
             .args(&[
