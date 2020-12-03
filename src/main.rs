@@ -179,7 +179,7 @@ fn integrate(
             "--no-edit",
             &remote_diffbase,
             "-m",
-            &format!("[update diffbase: {}]", target_branch_unprefixed),
+            &format!("[{}: update diffbase]", target_branch_unprefixed),
             "-m",
             &format!(
                 "{}: {}\n{}: {}",
@@ -212,7 +212,7 @@ fn integrate(
         } else if same_tree {
             "[no-op] [ci skip]\n".into()
         } else {
-            format!("[update patch: {}]\n", target_branch_unprefixed).into()
+            format!("[{}: update patch]\n", target_branch_unprefixed).into()
         };
         let mut interpret_trailers_child = Command::new("git")
             .args(&[
