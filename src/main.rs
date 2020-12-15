@@ -208,9 +208,9 @@ fn integrate(
         let msg: Cow<'_, str> = if new_branch {
             source_commit.message.as_str().into()
         } else if same_tree && bump {
-            "[bump ci]\n".into()
+            format!("[{}: bump ci]\n", target_branch_unprefixed).into()
         } else if same_tree {
-            "[no-op] [ci skip]\n".into()
+            format!("[{}: no-op] [ci skip]\n", target_branch_unprefixed).into()
         } else {
             format!("[{}: update patch]\n", target_branch_unprefixed).into()
         };
