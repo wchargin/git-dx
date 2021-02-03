@@ -18,6 +18,7 @@ fn main() -> err::Result<()> {
     const CLI_ARG_BUMP: &'static str = "bump";
     const CLI_ARG_COMMIT: &'static str = "commit";
     const CLI_ARG_DRY_RUN: &'static str = "dry_run";
+    const CLI_ARG_MESSAGE: &'static str = "message";
     const CLI_ARG_PUSH: &'static str = "push";
     const CLI_ARG_REMOTE: &'static str = "remote";
 
@@ -41,6 +42,14 @@ fn main() -> err::Result<()> {
                 .help("Use dry-run pushes only")
                 .long("--dry-run")
                 .short("-n"),
+        )
+        .arg(
+            clap::Arg::with_name(CLI_ARG_MESSAGE)
+                .help("Short description of updates")
+                .value_name("msg")
+                .long("--message")
+                .short("-m")
+                .takes_value(true),
         )
         .arg(
             clap::Arg::with_name(CLI_ARG_ALLOW_EMPTY)
@@ -72,13 +81,21 @@ fn main() -> err::Result<()> {
     let mut allow_empty = matches.is_present(CLI_ARG_ALLOW_EMPTY);
     let bump = matches.is_present(CLI_ARG_BUMP);
     let remote = matches.value_of(CLI_ARG_REMOTE).unwrap();
+    let message = matches.value_of(CLI_ARG_MESSAGE);
 
     if bump {
         allow_empty = true;
     }
 
     let source_commit = git.commit(source_commit_oid)?.clone();
-    let result = integrate(&mut git, &source_commit, &remote, allow_empty, bump)?;
+    let result = integrate(
+        &mut git,
+        &source_commit,
+        &remote,
+        allow_empty,
+        bump,
+        message,
+    )?;
     eprintln!("successfully integrated");
     println!("{}", result.remote_commit);
     err::from_git(
@@ -126,6 +143,7 @@ fn integrate(
     remote: &str,
     allow_empty: bool,
     bump: bool,
+    message: Option<&str>,
 ) -> err::Result<Integration> {
     // Steps (see Terminology section of README.md):
     //
@@ -212,7 +230,12 @@ fn integrate(
         } else if same_tree {
             format!("[{}: no-op] [ci skip]\n", target_branch_unprefixed).into()
         } else {
-            format!("[{}: update patch]\n", target_branch_unprefixed).into()
+            format!(
+                "[{}: {}]\n",
+                target_branch_unprefixed,
+                message.unwrap_or("update patch")
+            )
+            .into()
         };
         let mut interpret_trailers_child = Command::new("git")
             .args(&[
