@@ -127,7 +127,7 @@ contain a colon, then trailers may not be set correctly.
   - [Advice for clean history][linus] (Linus Torvalds, 2009-03-29, posted to the
     `dri-devel@lists.sourceforge.net` mailing list) ([mirror at
     mail-archive.com][linus-mailarchive])
-  - [“Managing dependent pull requests”][mdpr] (William Chargin, 2017-07-28)
+  - [“Managing dependent pull requests”][mdpr] (Willow Chargin, 2017-07-28)
 
 [linus-mailarchive]: https://www.mail-archive.com/dri-devel@lists.sourceforge.net/msg39091.html
 [linus]: https://sourceforge.net/p/dri/mailman/message/21962376/
