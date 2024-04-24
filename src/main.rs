@@ -194,6 +194,7 @@ fn integrate(
             "-c",
             "rerere.enabled=false",
             "merge",
+            "--no-verify",
             "--no-edit",
             &remote_diffbase,
             "-m",
@@ -210,7 +211,7 @@ fn integrate(
         let out = &Command::new("git").args(&["add", "."]).output()?;
         err::from_git(out, || "failed to stage".to_string())?;
         let out = &Command::new("git")
-            .args(&["commit", "--no-edit"])
+            .args(&["commit", "--no-edit", "--no-verify"])
             .output()?;
         err::from_git(out, || "failed to commit merge".to_string())?;
     }
